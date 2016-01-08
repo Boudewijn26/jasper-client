@@ -1,5 +1,5 @@
 # -*- coding: utf-8-*-
-import urllib2
+import urllib.request
 import re
 import random
 from bs4 import BeautifulSoup
@@ -28,8 +28,8 @@ def getTopStories(maxResults=None):
         maxResults -- if provided, returns a random sample of size maxResults
     """
     hdr = {'User-Agent': 'Mozilla/5.0'}
-    req = urllib2.Request(URL, headers=hdr)
-    page = urllib2.urlopen(req).read()
+    req = urllib.request.Request(URL, headers=hdr)
+    page = urllib.request.urlopen(req).read()
     soup = BeautifulSoup(page)
     matches = soup.findAll('td', class_="title")
     matches = [m.a for m in matches if m.a and m.text != u'More']

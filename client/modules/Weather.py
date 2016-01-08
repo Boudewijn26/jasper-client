@@ -3,6 +3,7 @@ import re
 import datetime
 import struct
 import urllib
+import urllib.parse
 import feedparser
 import requests
 import bs4
@@ -60,21 +61,21 @@ def get_locations():
     #  13  5 wmo_id
     s = struct.Struct("25s1s2s1s2s2s4s5s7s1s7s1s5s5s")
     for line in data.splitlines()[3:]:
-        row = s.unpack_from(line)
-        info = {'name': row[0].strip(),
+        row = s.unpack_from(line.encode('ascii'))
+        info = {'name': row[0].strip().decode('utf-8'),
                 'region': row[2].strip(),
                 'country': row[4].strip(),
                 'latitude': float(row[8].strip()),
                 'logitude': float(row[10].strip()),
                 'elevation': int(row[12].strip()),
                 'id': row[6].strip(),
-                'wmo_id': row[13].strip()}
+                'wmo_id': row[13].strip().decode('utf-8')}
         yield info
 
 
 def get_forecast_by_name(location_name):
     entries = feedparser.parse("http://rss.wunderground.com/auto/rss_full/%s"
-                               % urllib.quote(location_name))['entries']
+                               % urllib.parse.quote(location_name))['entries']
     if entries:
         # We found weather data the easy way
         return entries
@@ -87,8 +88,7 @@ def get_forecast_by_name(location_name):
 
 def get_forecast_by_wmo_id(wmo_id):
     return feedparser.parse("http://rss.wunderground.com/auto/" +
-                            "rss_full/global/stations/%s.xml"
-                            % wmo_id)['entries']
+                            "rss_full/global/stations/{0}.xml".format(wmo_id))['entries']
 
 
 def handle(text, mic, profile):

@@ -7,8 +7,8 @@ import logging
 
 import yaml
 
-import diagnose
-import jasperpath
+import client.diagnose as diagnose
+import client.jasperpath as jasperpath
 
 
 class PhonetisaurusG2P(object):

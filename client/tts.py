@@ -16,15 +16,17 @@ import pipes
 import logging
 import wave
 import urllib
-import urlparse
+import urllib.parse
 import requests
+import pyaudio
+import cmd
 from abc import ABCMeta, abstractmethod
 
 import argparse
 import yaml
 
 try:
-    import mad
+    from pydub import AudioSegment
 except ImportError:
     pass
 
@@ -38,8 +40,8 @@ try:
 except ImportError:
     pass
 
-import diagnose
-import jasperpath
+import client.diagnose as diagnose
+import client.jasperpath as jasperpath
 
 
 class AbstractTTSEngine(object):
@@ -61,7 +63,7 @@ class AbstractTTSEngine(object):
     @classmethod
     @abstractmethod
     def is_available(cls):
-        return diagnose.check_executable('aplay')
+        return True
 
     def __init__(self, **kwargs):
         self._logger = logging.getLogger(__name__)
@@ -73,15 +75,22 @@ class AbstractTTSEngine(object):
     def play(self, filename):
         # FIXME: Use platform-independent audio-output here
         # See issue jasperproject/jasper-client#188
-        cmd = ['aplay', '-D', 'plughw:1,0', str(filename)]
-        self._logger.debug('Executing %s', ' '.join([pipes.quote(arg)
-                                                     for arg in cmd]))
-        with tempfile.TemporaryFile() as f:
-            subprocess.call(cmd, stdout=f, stderr=f)
-            f.seek(0)
-            output = f.read()
-            if output:
-                self._logger.debug("Output was: '%s'", output)
+        chunksize = 12000
+
+        f = wave.open(filename, 'rb')
+        p = pyaudio.PyAudio()
+        stream = p.open(format=p.get_format_from_width(f.getsampwidth()),
+                        channels=f.getnchannels(),
+                        rate=f.getframerate(),
+                        output=True)
+        data = f.readframes(chunksize)
+        while data:
+            stream.write(data)
+            data = f.readframes(chunksize)
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
 
 
 class AbstractMp3TTSEngine(AbstractTTSEngine):
@@ -91,21 +100,12 @@ class AbstractMp3TTSEngine(AbstractTTSEngine):
     @classmethod
     def is_available(cls):
         return (super(AbstractMp3TTSEngine, cls).is_available() and
-                diagnose.check_python_import('mad'))
+                diagnose.check_python_import('pydub'))
 
     def play_mp3(self, filename):
-        mf = mad.MadFile(filename)
+        sound = AudioSegment.from_mp3(filename)
         with tempfile.NamedTemporaryFile(suffix='.wav') as f:
-            wav = wave.open(f, mode='wb')
-            wav.setframerate(mf.samplerate())
-            wav.setnchannels(1 if mf.mode() == mad.MODE_SINGLE_CHANNEL else 2)
-            # 4L is the sample width of 32 bit audio
-            wav.setsampwidth(4L)
-            frame = mf.read()
-            while frame is not None:
-                wav.writeframes(frame)
-                frame = mf.read()
-            wav.close()
+            sound.export(f, format="wav")
             self.play(f.name)
 
 
@@ -468,9 +468,9 @@ class GoogleTTS(AbstractMp3TTSEngine):
         tts = gtts.gTTS(text=phrase, lang=self.language)
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
             tmpfile = f.name
-        tts.save(tmpfile)
-        self.play_mp3(tmpfile)
-        os.remove(tmpfile)
+            tts.save(tmpfile)
+            self.play_mp3(tmpfile)
+            os.remove(tmpfile)
 
 
 class MaryTTS(AbstractTTSEngine):
@@ -540,12 +540,14 @@ class MaryTTS(AbstractTTSEngine):
                 diagnose.check_network_connection())
 
     def _makeurl(self, path, query={}):
-        query_s = urllib.urlencode(query)
+        query_s = urllib.parse.urlencode(query)
         urlparts = ('http', self.netloc, path, query_s, '')
-        return urlparse.urlunsplit(urlparts)
+        return urllib.parse.urlunsplit(urlparts)
 
     def say(self, phrase):
         self._logger.debug("Saying '%s' with '%s'", phrase, self.SLUG)
+        print(self.language)
+        print(self.languages)
         if self.language not in self.languages:
             raise ValueError("Language '%s' not supported by '%s'"
                              % (self.language, self.SLUG))
@@ -651,8 +653,8 @@ def get_engine_by_slug(slug=None):
     if not slug or type(slug) is not str:
         raise TypeError("Invalid slug '%s'", slug)
 
-    selected_engines = filter(lambda engine: hasattr(engine, "SLUG") and
-                              engine.SLUG == slug, get_engines())
+    selected_engines = list(filter(lambda engine: hasattr(engine, "SLUG") and
+                              engine.SLUG == slug, get_engines()))
     if len(selected_engines) == 0:
         raise ValueError("No TTS engine found for slug '%s'" % slug)
     else:
@@ -661,8 +663,8 @@ def get_engine_by_slug(slug=None):
                   "This is most certainly a bug." % slug)
         engine = selected_engines[0]
         if not engine.is_available():
-            raise ValueError(("TTS engine '%s' is not available (due to " +
-                              "missing dependencies, etc.)") % slug)
+            raise ValueError(("TTS engine '{0}' is not available (due to " +
+                              "missing dependencies, etc.)").format(slug))
         return engine
 
 
